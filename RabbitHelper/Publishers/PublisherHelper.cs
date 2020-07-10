@@ -1,14 +1,17 @@
 ﻿using Newtonsoft.Json;
+using NLog;
 using RabbitHelper.Connector;
 using RabbitHelper.Events;
+using RabbitHelper.Logs;
 using RabbitHelper.Queues;
 using RabbitMQ.Client;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
 namespace RabbitHelper.Publishers
 {
-    public class PublisherHelper : IPublisher
+    public class PublisherHelper
     {
         private readonly QueueParametersGeneric parameters;
         private static readonly Dictionary<string, bool> hasQueue = new Dictionary<string, bool>(5000);
@@ -155,6 +158,8 @@ namespace RabbitHelper.Publishers
                 channel.BasicPublish(Exchange, QueueOrTopicName, properties, encodedMessage);
             else
                 channel.BasicPublish(Exchange, routingKey, properties, encodedMessage);
+
+            Console.WriteLine($"Message was published on exchange {Exchange} at {DateTime.Now}");
         }
 
         private void ConnectRabbitMQ()

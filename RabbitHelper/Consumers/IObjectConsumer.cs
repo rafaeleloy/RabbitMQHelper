@@ -1,4 +1,5 @@
 ﻿using RabbitHelper.Events;
+using System.Collections.Generic;
 
 namespace RabbitHelper.Consumers
 {
@@ -14,6 +15,6 @@ namespace RabbitHelper.Consumers
         /// The consumer method.
         /// </summary>
         /// <param name="message">The received message.</param>
-        public bool Consume(object message);
+        public bool Consume(object message, Dictionary<string, object> messageProperties);
     }
 }
