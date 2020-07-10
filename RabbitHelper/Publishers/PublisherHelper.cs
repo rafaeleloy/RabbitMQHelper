@@ -1,8 +1,6 @@
 ﻿using Newtonsoft.Json;
-using NLog;
 using RabbitHelper.Connector;
 using RabbitHelper.Events;
-using RabbitHelper.Logs;
 using RabbitHelper.Queues;
 using RabbitMQ.Client;
 using System;
