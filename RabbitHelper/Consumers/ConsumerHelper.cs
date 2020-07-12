@@ -123,23 +123,23 @@ namespace RabbitHelper.Consumers
                     ulong deliveryTag = e.DeliveryTag;
                     ReSend.TryGetValue(deliveryTag, out int tries);
 
-                    if (!ReSend.ContainsKey(e.DeliveryTag))
+                    if (!ReSend.ContainsKey(deliveryTag))
                     {
-                        ReSend.Add(e.DeliveryTag, 1);
-                        Channel.BasicReject(e.DeliveryTag, true);
+                        ReSend.Add(deliveryTag, 1);
+                        Channel.BasicReject(deliveryTag, true);
 
                         _logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
                     }
                     else if (tries < 4)
                     {
                         ReSend[deliveryTag] = tries++;
-                        Channel.BasicReject(e.DeliveryTag, true);
+                        Channel.BasicReject(deliveryTag, true);
 
                         _logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
                     }
                     else
                     {
-                        Channel.BasicReject(e.DeliveryTag, false);
+                        Channel.BasicReject(deliveryTag, false);
 
                         _logControl.Warn($"Error on consume message => {deliveryTag} message was moved to delay queue");
                     }

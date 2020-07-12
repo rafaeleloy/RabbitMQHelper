@@ -1,14 +1,13 @@
-﻿using System.Collections.Generic;
+﻿using RabbitHelper.Events;
 
 namespace RabbitHelper.Consumers
 {
-    public interface IObjectConsumer : IConsumer
+    public interface IGenericObjectConsumer : IConsumer
     {
-
         /// <summary>
         /// The consumer method.
         /// </summary>
         /// <param name="message">The received message.</param>
-        bool Consume(object message, Dictionary<string, object> messageProperties);
+        bool Consume<T>(T message) where T : class, IEvent;
     }
 }
