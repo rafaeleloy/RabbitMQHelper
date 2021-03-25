@@ -22,7 +22,7 @@ namespace RabbitHelper.Connector
         public QueueParametersGeneric()
         {
             Server = Environment.GetEnvironmentVariable("RB_SERVER");
-            Port = int.Parse(Environment.GetEnvironmentVariable("RB_PORT"));
+            Port = TryGetEnviromentVariable("RB_PORT", 0);
             UserName = Environment.GetEnvironmentVariable("RB_USER");
             Password = Environment.GetEnvironmentVariable("RB_PWD");
             VirtualHost = Environment.GetEnvironmentVariable("RB_VHOST");
@@ -38,7 +38,7 @@ namespace RabbitHelper.Connector
         {
             var connection = new ConnectionFactory()
             {
-                RequestedHeartbeat = 30
+                RequestedHeartbeat = TimeSpan.FromSeconds(30)
             };
 
             if (!string.IsNullOrEmpty(Server))
@@ -60,6 +60,11 @@ namespace RabbitHelper.Connector
             }
 
             return connection;
+        }
+
+        private int TryGetEnviromentVariable(string variable, int defaultValue)
+        {
+            return Environment.GetEnvironmentVariable(variable) is null ? defaultValue : int.Parse(Environment.GetEnvironmentVariable(variable));
         }
     }
 }

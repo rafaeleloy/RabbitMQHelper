@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using Newtonsoft.Json.Linq;
+using System.Collections.Generic;
 
 namespace RabbitHelper.Consumers
 {
@@ -9,6 +10,6 @@ namespace RabbitHelper.Consumers
         /// The consumer method.
         /// </summary>
         /// <param name="message">The received message.</param>
-        bool Consume(object message, Dictionary<string, object> messageProperties);
+        bool Consume(JObject message, Dictionary<string, object> messageProperties);
     }
 }

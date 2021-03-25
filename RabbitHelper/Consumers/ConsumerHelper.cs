@@ -1,7 +1,5 @@
 ﻿using Newtonsoft.Json;
-using NLog;
 using RabbitHelper.Connector;
-using RabbitHelper.Logs;
 using RabbitHelper.Queues;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -16,11 +14,9 @@ namespace RabbitHelper.Consumers
 {
     public abstract class ConsumerHelper
     {
-        private readonly Logger _logControl;
-
-        private readonly Func<IConnection> ConnectionFactory;
         private EventingBasicConsumer Consumer;
-        private readonly QueueParametersGeneric Parameters;
+        public QueueParametersGeneric Parameters;
+        private readonly AutoResetEvent _eventHandler = new AutoResetEvent(false);
 
         private static IModel Channel;
 
@@ -32,12 +28,12 @@ namespace RabbitHelper.Consumers
         private bool IsExclusive { get; set; }
         private Dictionary<ulong, int> ReSend { get; set; }
 
-        public ConsumerHelper(ILogControl logControl, string queueNameOrTopicName, List<string> topicName = null,
+        protected virtual bool ProcessMessage(string body, IDictionary<string, object> filters) => true;
+
+        public ConsumerHelper(string queueNameOrTopicName, QueueParametersGeneric parameters = null, List<string> topicName = null,
                               ushort prefetchCount = 100, bool isExclusive = false, string routingKey = "")
         {
-            _logControl = logControl.GetLogger(GetType().Name);
-
-            Parameters = new QueueParametersGeneric();
+            Parameters = parameters;
             QueueOrTopicName = queueNameOrTopicName;
             TopicName = topicName;
             PrefetchCount = prefetchCount;
@@ -51,98 +47,62 @@ namespace RabbitHelper.Consumers
         /// <param name="channel">The channel connection of RabbitMQ.</param>
         /// <param name="queue">The queue name.</param>
         /// <param name="autoAck">The option autoAck.</param>
-        /// <param name="withParameterType">If the received message wold be send with parameter type of the method 'Consume'.</param>
+        /// <param name="withParameterType">If the received message would be send with parameter type of the method 'Consume'.</param>
         public void RegisterConsumers()
         {
+            if (Channel != null && Channel.IsOpen)
+                throw new Exception("There's an already connection opened.");
+
             EnsureHasConsumer();
 
-            foreach (var method in GetConsumerMethods())
-            {
-                var parameter = method.GetParameters().FirstOrDefault();
+            Consumer.Received += ConsumerReceived;
 
-                Consumer.Received += ConsumerThread;
+            _eventHandler.WaitOne();
 
-                _logControl.Info($"Starting consume => {QueueOrTopicName}");
-            }
-        }
-
-        private void ConsumerThread(object sender, BasicDeliverEventArgs e)
-        {
-            try
-            {
-                var thread = new Thread(() => ConsumerReceived(sender, e));
-                thread.Start();
-            }
-            catch(ThreadStartException ex)
-            {
-                _logControl.Error($"Error while trying to start the consumer thread, error: {ex.Message}");
-            }
-            catch(Exception ex)
-            {
-                _logControl.Error($"Error while trying to start the consumer thread, error: {ex.Message}");
-            }
-        }
-
-        private IEnumerable<MethodInfo> GetConsumerMethods()
-        {
-            return Assembly
-                   .GetEntryAssembly()
-                   .GetTypes()
-                   .Where(mytype => mytype.GetInterfaces().Contains(typeof(IConsumer)) && mytype.IsClass)
-                   .SelectMany(x => x.GetMethods().Where(x => x.Name == "Consume"));
+            while (Channel.IsClosed)
+                _eventHandler.Set();
         }
 
         private void ConsumerReceived(object sender, BasicDeliverEventArgs e)
         {
-            foreach (var method in GetConsumerMethods())
+            var message = Encoding.UTF8.GetString(e.Body.ToArray());
+
+            SuccessConsume = ProcessMessage(message, e.BasicProperties.Headers);
+
+            if (SuccessConsume)
             {
-                var parameter = method.GetParameters();
+                Channel.BasicAck(e.DeliveryTag, false);
 
-                var message = JsonConvert.DeserializeObject(Encoding.UTF8.GetString(e.Body), parameter.FirstOrDefault().ParameterType);
-                bool containsHeader = parameter.Select(parameterDictionary => parameterDictionary.ParameterType == typeof(Dictionary<string, string>)).ToList().Count > 0;
+                //_logControl.Info($"Consumed message => {e.DeliveryTag} at {DateTime.Now}");
+                Console.WriteLine($"Consumed message => {e.DeliveryTag} at {DateTime.Now}");
+            }
+            else
+            {
+                ulong deliveryTag = e.DeliveryTag;
+                ReSend.TryGetValue(deliveryTag, out int tries);
 
-                List<object> parameterList = new List<object>();
-                parameterList.Add(message);
-
-                if (containsHeader)
+                if (!ReSend.ContainsKey(deliveryTag))
                 {
-                    if (e.BasicProperties.Headers != null)
-                        parameterList.Add(e.BasicProperties.Headers);
+                    ReSend.Add(deliveryTag, 1);
+                    Channel.BasicReject(deliveryTag, true);
+
+                    //_logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
+                    Console.WriteLine($"Error on consume message => {deliveryTag} message was requeued");
                 }
-
-                SuccessConsume = (bool)method.Invoke(method.DeclaringType.Assembly.CreateInstance(method.DeclaringType.FullName), parameterList.ToArray());
-
-                if (SuccessConsume)
+                else if (tries < 4)
                 {
-                    Channel.BasicAck(e.DeliveryTag, false);
+                    ReSend[deliveryTag] = tries++;
+                    Channel.BasicReject(deliveryTag, true);
 
-                    _logControl.Info($"Consumed message => {e.DeliveryTag} at {DateTime.Now}");
+                    //_logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
+                    Console.WriteLine($"Error on consume message => {deliveryTag} message was requeued");
                 }
                 else
                 {
-                    ulong deliveryTag = e.DeliveryTag;
-                    ReSend.TryGetValue(deliveryTag, out int tries);
+                    Channel.BasicReject(deliveryTag, false);
 
-                    if (!ReSend.ContainsKey(deliveryTag))
-                    {
-                        ReSend.Add(deliveryTag, 1);
-                        Channel.BasicReject(deliveryTag, true);
-
-                        _logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
-                    }
-                    else if (tries < 4)
-                    {
-                        ReSend[deliveryTag] = tries++;
-                        Channel.BasicReject(deliveryTag, true);
-
-                        _logControl.Warn($"Error on consume message => {deliveryTag} message was requeued");
-                    }
-                    else
-                    {
-                        Channel.BasicReject(deliveryTag, false);
-
-                        _logControl.Warn($"Error on consume message => {deliveryTag} message was moved to delay queue");
-                    }
+                    //_logControl.Warn($"Error on consume message => {deliveryTag} message was moved to delay queue");
+                    Console.WriteLine($"Error on consume message => {deliveryTag} message was moved to delay queue");
                 }
             }
         }
@@ -156,10 +116,12 @@ namespace RabbitHelper.Consumers
                     Channel.Close();
                 }
 
-                Channel = ConnectionFactory().CreateModel();
+                var _factory = Parameters?.SearchConnectionFactory() ?? new QueueParametersGeneric().SearchConnectionFactory();
+                var _connection = _factory.CreateConnection();
+
+                Channel = _connection.CreateModel();
                 Channel.BasicQos(0, PrefetchCount, false);
 
-                // Declara a fila para garantir que ela existe.
                 if (TopicName != null)
                     QueueHelper.DeclareTopicQueue(Channel, QueueOrTopicName, TopicName, RoutingKey);
                 else if (IsExclusive)
@@ -170,7 +132,7 @@ namespace RabbitHelper.Consumers
                 Consumer = new EventingBasicConsumer(Channel);
                 Channel.BasicConsume(QueueOrTopicName, false, Consumer);
 
-                _logControl.Info("Establishing connection with RabbitMQ");
+                Console.WriteLine("Establishing connection with RabbitMQ");
             }
         }
     }
